@@ -215,8 +215,11 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		// Build the hash for the map. We do this by XOR-ing all the key
 		// and value hashes. This makes it deterministic despite ordering.
 		var h uint64
-		for _, k := range v.MapKeys() {
-			v := v.MapIndex(k)
+
+		iter := v.MapRange()
+		for iter.Next() {
+			k := iter.Key()
+			v := iter.Value()
 			if includeMap != nil {
 				incl, err := includeMap.HashIncludeMap(
 					opts.StructField, k.Interface(), v.Interface())
