@@ -220,12 +220,16 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		// and value hashes. This makes it deterministic despite ordering.
 		var h uint64
 
+		k := reflect.New(v.Type().Key()).Elem()
+		vv := reflect.New(v.Type().Elem()).Elem()
+
 		iter := v.MapRange()
+
 		for iter.Next() {
-			k := iter.Key()
-			v := iter.Value()
+			k.SetIterKey(iter)
+			vv.SetIterValue(iter)
 			if includeMap != nil {
-				incl, err := includeMap.HashIncludeMap(field, k.Interface(), v.Interface())
+				incl, err := includeMap.HashIncludeMap(field, k.Interface(), vv.Interface())
 				if err != nil {
 					return 0, err
 				}
@@ -238,7 +242,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			if err != nil {
 				return 0, err
 			}
-			vh, err := w.visit(v, nil)
+			vh, err := w.visit(vv, nil)
 			if err != nil {
 				return 0, err
 			}
