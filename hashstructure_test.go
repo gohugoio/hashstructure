@@ -692,6 +692,91 @@ func TestHash_hashable(t *testing.T) {
 	}
 }
 
+func TestHash_golden(t *testing.T) {
+	foo := "foo"
+
+	cases := []struct {
+		In     any
+		Expect uint64
+	}{
+		{
+			In:     nil,
+			Expect: 12161962213042174405,
+		},
+		{
+			In:     "foo",
+			Expect: 15621798640163566899,
+		},
+		{
+			In:     42,
+			Expect: 11375694726533372055,
+		},
+		{
+			In:     true,
+			Expect: 12638153115695167454,
+		},
+		{
+			In:     false,
+			Expect: 12638153115695167455,
+		},
+		{
+			In:     []string{"foo", "bar"},
+			Expect: 18333885979647637445,
+		},
+		{
+			In:     []interface{}{1, nil, "foo"},
+			Expect: 636613494442026145,
+		},
+		{
+			In:     map[string]string{"foo": "bar"},
+			Expect: 5334326627423288605,
+		},
+		{
+			In:     map[string]*string{"foo": &foo},
+			Expect: 4615367350888355399,
+		},
+		{
+			In:     map[*string]string{&foo: "bar"},
+			Expect: 5334326627423288605,
+		},
+		{
+			In:     map[interface{}]string{"foo": "bar"},
+			Expect: 5334326627423288605,
+		},
+		{
+			In:     map[interface{}]interface{}{"foo": "bar", "bar": 0},
+			Expect: 10207098687398820730,
+		},
+		{
+			In:     map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{&foo: "bar", "bar": 0}}}},
+			Expect: 18346441822047112296,
+		},
+		{
+			In: struct {
+				Foo string
+				Bar []interface{}
+			}{
+				Foo: "foo",
+				Bar: []interface{}{nil, nil, nil},
+			},
+			Expect: 14887393564066082535,
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			got, err := Hash(tc.In, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if got != tc.Expect {
+				t.Fatalf("expected: %d, got: %d", tc.Expect, got)
+			}
+		})
+	}
+}
+
 func BenchmarkMap(b *testing.B) {
 	m := map[string]any{
 		"a": "b",
