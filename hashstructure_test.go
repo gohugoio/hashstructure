@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 func TestHash_identity(t *testing.T) {
@@ -727,6 +729,7 @@ func TestHash_golden(t *testing.T) {
 			In:     int64(42),
 			Expect: 11375694726533372055,
 		},
+
 		{
 			In:     uint16(42),
 			Expect: 590708257076254031,
@@ -844,6 +847,22 @@ func BenchmarkMap(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		Hash(m, nil)
 	}
+}
+
+func BenchmarkString(b *testing.B) {
+	s := "lorem ipsum dolor sit amet"
+	b.Run("default", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Hash(s, nil)
+		}
+	})
+
+	b.Run("xxhash", func(b *testing.B) {
+		opts := &HashOptions{Hasher: xxhash.New()}
+		for i := 0; i < b.N; i++ {
+			Hash(s, opts)
+		}
+	})
 }
 
 type testIncludable struct {

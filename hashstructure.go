@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"io"
 	"reflect"
 	"time"
 )
@@ -122,6 +123,13 @@ type visitOpts struct {
 
 var timeType = reflect.TypeOf(time.Time{})
 
+// A direct hash calculation used for numeric and bool values.
+func (w *walker) hashDirect(v any) (uint64, error) {
+	w.h.Reset()
+	err := binary.Write(w.h, binary.LittleEndian, v)
+	return w.h.Sum64(), err
+}
+
 func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	t := reflect.TypeOf(0)
 
@@ -152,29 +160,34 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		v = reflect.Zero(t)
 	}
 
-	// Binary writing can use raw ints, we have to convert to
-	// a sized-int, we'll choose the largest...
-	switch v.Kind() {
-	case reflect.Int:
-		v = reflect.ValueOf(int64(v.Int()))
-	case reflect.Uint:
-		v = reflect.ValueOf(uint64(v.Uint()))
-	case reflect.Bool:
-		var tmp int8
-		if v.Bool() {
-			tmp = 1
+	if v.CanInt() {
+		if v.Kind() == reflect.Int {
+			// binary.Write requires a fixed-size value.
+			return w.hashDirect(v.Int())
 		}
-		v = reflect.ValueOf(tmp)
+		return w.hashDirect(v.Interface())
+	}
+
+	if v.CanUint() {
+		if v.Kind() == reflect.Uint {
+			// binary.Write requires a fixed-size value.
+			return w.hashDirect(v.Uint())
+		}
+		return w.hashDirect(v.Interface())
+	}
+
+	if v.CanFloat() {
+		return w.hashDirect(v.Interface())
 	}
 
 	k := v.Kind()
 
-	// We can shortcut numeric values by directly binary writing them
-	if k >= reflect.Int && k <= reflect.Complex64 {
-		// A direct hash calculation
-		w.h.Reset()
-		err := binary.Write(w.h, binary.LittleEndian, v.Interface())
-		return w.h.Sum64(), err
+	if k == reflect.Bool {
+		var tmp int8
+		if v.Bool() {
+			tmp = 1
+		}
+		return w.hashDirect(tmp)
 	}
 
 	switch v.Type() {
@@ -394,7 +407,10 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	case reflect.String:
 		// Directly hash
 		w.h.Reset()
-		_, err := w.h.Write([]byte(v.String()))
+
+		// io.WriteString uses io.StringWriter if it exists, which is
+		// implemented by e.g. github.com/cespare/xxhash.
+		_, err := io.WriteString(w.h, v.String())
 		return w.h.Sum64(), err
 
 	default:
