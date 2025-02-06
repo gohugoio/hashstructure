@@ -196,7 +196,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		return w.hashDirect(v.Interface())
 	}
 
-	if v.CanFloat() {
+	if v.CanFloat() || v.CanComplex() {
 		return w.hashDirect(v.Interface())
 	}
 

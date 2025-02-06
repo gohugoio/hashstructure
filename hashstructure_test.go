@@ -751,6 +751,14 @@ func TestHash_golden(t *testing.T) {
 			Expect: 12162027084228238918,
 		},
 		{
+			In:     complex64(42),
+			Expect: 13187391128804187615,
+		},
+		{
+			In:     complex128(42),
+			Expect: 4635205179288363782,
+		},
+		{
 			In:     true,
 			Expect: 12638153115695167454,
 		},
