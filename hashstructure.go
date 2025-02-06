@@ -91,6 +91,11 @@ func Hash(v interface{}, opts *HashOptions) (uint64, error) {
 	// Reset the hash
 	opts.Hasher.Reset()
 
+	// Fast path for strings.
+	if s, ok := v.(string); ok {
+		return hashString(opts.Hasher, s)
+	}
+
 	// Create our walker and walk the structure
 	w := &walker{
 		h:               opts.Hasher,
@@ -128,6 +133,21 @@ func (w *walker) hashDirect(v any) (uint64, error) {
 	w.h.Reset()
 	err := binary.Write(w.h, binary.LittleEndian, v)
 	return w.h.Sum64(), err
+}
+
+// A direct hash calculation used for strings.
+func (w *walker) hashString(s string) (uint64, error) {
+	return hashString(w.h, s)
+}
+
+// A direct hash calculation used for strings.
+func hashString(h hash.Hash64, s string) (uint64, error) {
+	h.Reset()
+
+	// io.WriteString uses io.StringWriter if it exists, which is
+	// implemented by e.g. github.com/cespare/xxhash.
+	_, err := io.WriteString(h, s)
+	return h.Sum64(), err
 }
 
 func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
@@ -405,14 +425,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		return h, nil
 
 	case reflect.String:
-		// Directly hash
-		w.h.Reset()
-
-		// io.WriteString uses io.StringWriter if it exists, which is
-		// implemented by e.g. github.com/cespare/xxhash.
-		_, err := io.WriteString(w.h, v.String())
-		return w.h.Sum64(), err
-
+		return w.hashString(v.String())
 	default:
 		return 0, fmt.Errorf("unknown kind to hash: %s", k)
 	}
