@@ -231,23 +231,55 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	}
 
 	if v.CanInt() {
-		if v.Kind() == reflect.Int {
-			// binary.Write requires a fixed-size value.
-			return w.hashDirect(v.Int())
+		i := v.Int()
+		switch v.Kind() {
+		case reflect.Int:
+			return w.hashDirect(i)
+		case reflect.Int8:
+			return w.hashDirect(int8(i))
+		case reflect.Int16:
+			return w.hashDirect(int16(i))
+		case reflect.Int32:
+			return w.hashDirect(int32(i))
+		case reflect.Int64:
+			return w.hashDirect(i)
 		}
-		return w.hashDirect(v.Interface())
 	}
 
 	if v.CanUint() {
-		if v.Kind() == reflect.Uint {
-			// binary.Write requires a fixed-size value.
-			return w.hashDirect(v.Uint())
+		u := v.Uint()
+		switch v.Kind() {
+		case reflect.Uint:
+			return w.hashDirect(u)
+		case reflect.Uint8:
+			return w.hashDirect(uint8(u))
+		case reflect.Uint16:
+			return w.hashDirect(uint16(u))
+		case reflect.Uint32:
+			return w.hashDirect(uint32(u))
+		case reflect.Uint64:
+			return w.hashDirect(u)
 		}
-		return w.hashDirect(v.Interface())
 	}
 
-	if v.CanFloat() || v.CanComplex() {
-		return w.hashDirect(v.Interface())
+	if v.CanFloat() {
+		f := v.Float()
+		switch v.Kind() {
+		case reflect.Float32:
+			return w.hashDirect(float32(f))
+		case reflect.Float64:
+			return w.hashDirect(f)
+		}
+	}
+
+	if v.CanComplex() {
+		c := v.Complex()
+		switch v.Kind() {
+		case reflect.Complex64:
+			return w.hashDirect(complex64(c))
+		case reflect.Complex128:
+			return w.hashDirect(c)
+		}
 	}
 
 	k := v.Kind()
@@ -340,18 +372,10 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		return h, nil
 
 	case reflect.Struct:
-		parent := v.Interface()
 		var include Includable
-		if impl, ok := parent.(Includable); ok {
-			include = impl
-		}
+		var parent interface{}
 
-		if impl, ok := parent.(Hashable); ok {
-			return impl.Hash()
-		}
-
-		// If we can address this value, check if the pointer value
-		// implements our interfaces and use that if so.
+		// Check if we can address this value first (more common case for pointer receivers)
 		if v.CanAddr() {
 			vptr := v.Addr()
 			parentptr := vptr.Interface()
@@ -360,6 +384,20 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			}
 
 			if impl, ok := parentptr.(Hashable); ok {
+				return impl.Hash()
+			}
+			// Only set parent if we'll need it for IncludableMap
+			parent = parentptr
+		}
+
+		// Only box the value if we haven't already found an implementation via pointer
+		if include == nil && parent == nil {
+			parent = v.Interface()
+			if impl, ok := parent.(Includable); ok {
+				include = impl
+			}
+
+			if impl, ok := parent.(Hashable); ok {
 				return impl.Hash()
 			}
 		}
@@ -372,6 +410,10 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 
 		l := v.NumField()
 		var fieldOpts visitOpts
+		// Defer boxing parent until we know we need it
+		if parent == nil {
+			parent = v.Interface()
+		}
 		fieldOpts.Struct = parent
 
 		for i := 0; i < l; i++ {
