@@ -6,6 +6,7 @@ import (
 	"hash"
 	"hash/fnv"
 	"io"
+	"math"
 	"reflect"
 	"time"
 )
@@ -115,6 +116,7 @@ type walker struct {
 	ignorezerovalue bool
 	sets            bool
 	stringer        bool
+	buf             [16]byte // Reusable buffer for binary encoding
 }
 
 type visitOpts struct {
@@ -131,8 +133,54 @@ var timeType = reflect.TypeOf(time.Time{})
 // A direct hash calculation used for numeric and bool values.
 func (w *walker) hashDirect(v any) (uint64, error) {
 	w.h.Reset()
-	err := binary.Write(w.h, binary.LittleEndian, v)
-	return w.h.Sum64(), err
+
+	// Use direct byte manipulation for numbers instead of binary.Write to avoid allocations
+	switch val := v.(type) {
+	case int64:
+		binary.LittleEndian.PutUint64(w.buf[:8], uint64(val))
+		w.h.Write(w.buf[:8])
+	case uint64:
+		binary.LittleEndian.PutUint64(w.buf[:8], val)
+		w.h.Write(w.buf[:8])
+	case int8:
+		w.buf[0] = byte(val)
+		w.h.Write(w.buf[:1])
+	case uint8:
+		w.buf[0] = val
+		w.h.Write(w.buf[:1])
+	case int16:
+		binary.LittleEndian.PutUint16(w.buf[:2], uint16(val))
+		w.h.Write(w.buf[:2])
+	case uint16:
+		binary.LittleEndian.PutUint16(w.buf[:2], val)
+		w.h.Write(w.buf[:2])
+	case int32:
+		binary.LittleEndian.PutUint32(w.buf[:4], uint32(val))
+		w.h.Write(w.buf[:4])
+	case uint32:
+		binary.LittleEndian.PutUint32(w.buf[:4], val)
+		w.h.Write(w.buf[:4])
+	case float32:
+		binary.LittleEndian.PutUint32(w.buf[:4], math.Float32bits(val))
+		w.h.Write(w.buf[:4])
+	case float64:
+		binary.LittleEndian.PutUint64(w.buf[:8], math.Float64bits(val))
+		w.h.Write(w.buf[:8])
+	case complex64:
+		binary.LittleEndian.PutUint32(w.buf[:4], math.Float32bits(real(val)))
+		binary.LittleEndian.PutUint32(w.buf[4:8], math.Float32bits(imag(val)))
+		w.h.Write(w.buf[:8])
+	case complex128:
+		binary.LittleEndian.PutUint64(w.buf[:8], math.Float64bits(real(val)))
+		binary.LittleEndian.PutUint64(w.buf[8:16], math.Float64bits(imag(val)))
+		w.h.Write(w.buf[:16])
+	default:
+		// Fallback to binary.Write for unsupported types, for instance enums
+		err := binary.Write(w.h, binary.LittleEndian, v)
+		return w.h.Sum64(), err
+	}
+
+	return w.h.Sum64(), nil
 }
 
 // A direct hash calculation used for strings.
@@ -218,8 +266,8 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			return 0, err
 		}
 
-		err = binary.Write(w.h, binary.LittleEndian, b)
-		return w.h.Sum64(), err
+		w.h.Write(b)
+		return w.h.Sum64(), nil
 	}
 
 	switch k {
@@ -434,16 +482,10 @@ func hashUpdateOrdered(h hash.Hash64, a, b uint64) uint64 {
 	// For ordered updates, use a real hash function
 	h.Reset()
 
-	// We just panic if the binary writes fail because we are writing
-	// an int64 which should never be fail-able.
-	e1 := binary.Write(h, binary.LittleEndian, a)
-	e2 := binary.Write(h, binary.LittleEndian, b)
-	if e1 != nil {
-		panic(e1)
-	}
-	if e2 != nil {
-		panic(e2)
-	}
+	var buf [16]byte
+	binary.LittleEndian.PutUint64(buf[0:8], a)
+	binary.LittleEndian.PutUint64(buf[8:16], b)
+	h.Write(buf[:])
 
 	return h.Sum64()
 }
@@ -469,11 +511,9 @@ func hashUpdateUnordered(a, b uint64) uint64 {
 func hashFinishUnordered(h hash.Hash64, a uint64) uint64 {
 	h.Reset()
 
-	// We just panic if the writes fail
-	e1 := binary.Write(h, binary.LittleEndian, a)
-	if e1 != nil {
-		panic(e1)
-	}
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], a)
+	h.Write(buf[:])
 
 	return h.Sum64()
 }
