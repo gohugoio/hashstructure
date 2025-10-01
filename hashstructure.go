@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
-	"io"
 	"math"
 	"reflect"
 	"time"
+	"unsafe"
 )
 
 // HashOptions are options that are available for hashing.
@@ -192,10 +192,12 @@ func (w *walker) hashString(s string) (uint64, error) {
 func hashString(h hash.Hash64, s string) (uint64, error) {
 	h.Reset()
 
-	// io.WriteString uses io.StringWriter if it exists, which is
-	// implemented by e.g. github.com/cespare/xxhash.
-	_, err := io.WriteString(h, s)
-	return h.Sum64(), err
+	// Use zero-copy conversion from string to []byte using unsafe
+	if len(s) > 0 {
+		b := unsafe.Slice(unsafe.StringData(s), len(s))
+		h.Write(b)
+	}
+	return h.Sum64(), nil
 }
 
 func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
