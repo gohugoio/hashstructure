@@ -315,15 +315,17 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		}
 
 		t := v.Type()
-		h, err := w.visit(reflect.ValueOf(t.Name()), nil)
+		h, err := w.hashString(t.Name())
 		if err != nil {
 			return 0, err
 		}
 
 		l := v.NumField()
+		var fieldOpts visitOpts
+		fieldOpts.Struct = parent
+
 		for i := 0; i < l; i++ {
 			if innerV := v.Field(i); v.CanSet() || t.Field(i).Name != "_" {
-				var f visitFlag
 				fieldType := t.Field(i)
 				if fieldType.PkgPath != "" {
 					// Unexported
@@ -366,21 +368,18 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					}
 				}
 
-				switch tag {
-				case "set":
-					f |= visitFlagSet
+				fieldOpts.Flags = 0
+				if tag == "set" {
+					fieldOpts.Flags |= visitFlagSet
 				}
 
-				kh, err := w.visit(reflect.ValueOf(fieldType.Name), nil)
+				kh, err := w.hashString(fieldType.Name)
 				if err != nil {
 					return 0, err
 				}
 
-				vh, err := w.visit(innerV, &visitOpts{
-					Flags:       f,
-					Struct:      parent,
-					StructField: fieldType.Name,
-				})
+				fieldOpts.StructField = fieldType.Name
+				vh, err := w.visit(innerV, &fieldOpts)
 				if err != nil {
 					return 0, err
 				}
