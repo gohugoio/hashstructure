@@ -268,6 +268,9 @@ func TestHash_equalIgnore(t *testing.T) {
 			},
 			true,
 		},
+		{
+			int16(-32768), uint16(32768), true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -722,6 +725,14 @@ func TestHash_golden(t *testing.T) {
 			Expect: 590708257076254031,
 		},
 		{
+			In:     int16(-32768),
+			Expect: 590684067820433261,
+		},
+		{
+			In:     int16(32767),
+			Expect: 590474061099445023,
+		},
+		{
 			In:     int32(42),
 			Expect: 843871326190827175,
 		},
@@ -729,10 +740,17 @@ func TestHash_golden(t *testing.T) {
 			In:     int64(42),
 			Expect: 11375694726533372055,
 		},
-
+		{
+			In:     uint16(0),
+			Expect: 590684067820433389,
+		},
 		{
 			In:     uint16(42),
 			Expect: 590708257076254031,
+		},
+		{
+			In:     uint16(65535),
+			Expect: 590474061099445151,
 		},
 		{
 			In:     uint32(42),
@@ -751,8 +769,16 @@ func TestHash_golden(t *testing.T) {
 			Expect: 12162027084228238918,
 		},
 		{
+			In:     float64(3.14159265359),
+			Expect: 999115755352816086,
+		},
+		{
 			In:     complex64(42),
 			Expect: 13187391128804187615,
+		},
+		{
+			In:     complex64(complex(1.2, 3.4)),
+			Expect: 12862333766589160118,
 		},
 		{
 			In:     complex128(42),
