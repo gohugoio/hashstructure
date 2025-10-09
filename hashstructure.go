@@ -48,11 +48,6 @@ type HashOptions struct {
 // concurrently. None of the values within a *HashOptions struct are
 // safe to read/write while hashing is being done.
 //
-// The "format" is required and must be one of the format values defined
-// by this library. You should probably just use "FormatV2". This allows
-// generated hashes uses alternate logic to maintain compatibility with
-// older versions.
-//
 // Notes on the value:
 //
 //   - Unexported fields on structs are ignored and do not affect the
