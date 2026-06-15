@@ -485,22 +485,33 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		// visit all the elements. If it is a set, then we do a deterministic
 		// hash code.
 		var h uint64
-		var set bool
+		set := w.sets
 		if opts != nil {
 			set = (opts.Flags & visitFlagSet) != 0
 		}
 		l := v.Len()
+
+		// If we are supposed to treat this slice as a set, repeated elements in
+		// a slice can cancel each other out because unordered hashes are XOR-ed
+		// together. Tracking hashes with this map gives us the semantics of a
+		// set.
+		hashes := map[uint64]struct{}{}
+
 		for i := 0; i < l; i++ {
 			current, err := w.visit(v.Index(i), nil)
 			if err != nil {
 				return 0, err
 			}
 
-			if set || w.sets {
-				h = hashUpdateUnordered(h, current)
+			if set {
+				hashes[current] = struct{}{}
 			} else {
 				h = hashUpdateOrdered(w.h, h, current)
 			}
+		}
+
+		for setHash := range hashes {
+			h = hashUpdateUnordered(h, setHash)
 		}
 
 		if set {
