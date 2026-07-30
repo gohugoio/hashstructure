@@ -10,30 +10,30 @@ import (
 )
 
 func TestHash_identity(t *testing.T) {
-	cases := []interface{}{
+	cases := []any{
 		nil,
 		"foo",
 		42,
 		true,
 		false,
 		[]string{"foo", "bar"},
-		[]interface{}{1, nil, "foo"},
+		[]any{1, nil, "foo"},
 		map[string]string{"foo": "bar"},
-		map[interface{}]string{"foo": "bar"},
-		map[interface{}]interface{}{"foo": "bar", "bar": 0},
+		map[any]string{"foo": "bar"},
+		map[any]any{"foo": "bar", "bar": 0},
 		struct {
 			Foo string
-			Bar []interface{}
+			Bar []any
 		}{
 			Foo: "foo",
-			Bar: []interface{}{nil, nil, nil},
+			Bar: []any{nil, nil, nil},
 		},
 		&struct {
 			Foo string
-			Bar []interface{}
+			Bar []any
 		}{
 			Foo: "foo",
-			Bar: []interface{}{nil, nil, nil},
+			Bar: []any{nil, nil, nil},
 		},
 	}
 
@@ -72,18 +72,18 @@ func TestHash_equal(t *testing.T) {
 	now := time.Now()
 
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 	}{
 		{
 			map[string]string{"foo": "bar"},
-			map[interface{}]string{"foo": "bar"},
+			map[any]string{"foo": "bar"},
 			true,
 		},
 
 		{
-			map[string]interface{}{"1": "1"},
-			map[string]interface{}{"1": "1", "2": "2"},
+			map[string]any{"1": "1"},
+			map[string]any{"1": "1", "2": "2"},
 			false,
 		},
 
@@ -219,7 +219,7 @@ func TestHash_equalIgnore(t *testing.T) {
 
 	now := time.Now()
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 	}{
 		{
@@ -312,7 +312,7 @@ func TestHash_stringTagError(t *testing.T) {
 	}
 
 	cases := []struct {
-		Test  interface{}
+		Test  any
 		Field string
 	}{
 		{
@@ -352,7 +352,7 @@ func TestHash_equalNil(t *testing.T) {
 	}
 
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		ZeroNil  bool
 		Match    bool
 	}{
@@ -431,7 +431,7 @@ func TestHash_equalSet(t *testing.T) {
 	}
 
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 	}{
 		{
@@ -471,7 +471,7 @@ func TestHash_equalSet(t *testing.T) {
 
 func TestHash_includable(t *testing.T) {
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 	}{
 		{
@@ -561,7 +561,7 @@ func TestHash_ignoreZeroValue(t *testing.T) {
 
 func TestHash_includableMap(t *testing.T) {
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 	}{
 		{
@@ -624,7 +624,7 @@ func TestHash_includableMap(t *testing.T) {
 
 func TestHash_hashable(t *testing.T) {
 	cases := []struct {
-		One, Two interface{}
+		One, Two any
 		Match    bool
 		Err      string
 	}{
@@ -797,7 +797,7 @@ func TestHash_golden(t *testing.T) {
 			Expect: 18333885979647637445,
 		},
 		{
-			In:     []interface{}{1, nil, "foo"},
+			In:     []any{1, nil, "foo"},
 			Expect: 636613494442026145,
 		},
 		{
@@ -813,24 +813,24 @@ func TestHash_golden(t *testing.T) {
 			Expect: 5334326627423288605,
 		},
 		{
-			In:     map[interface{}]string{"foo": "bar"},
+			In:     map[any]string{"foo": "bar"},
 			Expect: 5334326627423288605,
 		},
 		{
-			In:     map[interface{}]interface{}{"foo": "bar", "bar": 0},
+			In:     map[any]any{"foo": "bar", "bar": 0},
 			Expect: 10207098687398820730,
 		},
 		{
-			In:     map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{"foo": "bar", "bar": map[interface{}]interface{}{&foo: "bar", "bar": 0}}}},
+			In:     map[any]any{"foo": "bar", "bar": map[any]any{"foo": "bar", "bar": map[any]any{"foo": "bar", "bar": map[any]any{&foo: "bar", "bar": 0}}}},
 			Expect: 18346441822047112296,
 		},
 		{
 			In: struct {
 				Foo string
-				Bar []interface{}
+				Bar []any
 			}{
 				Foo: "foo",
-				Bar: []interface{}{nil, nil, nil},
+				Bar: []any{nil, nil, nil},
 			},
 			Expect: 14887393564066082535,
 		},
@@ -871,10 +871,10 @@ func BenchmarkMap(b *testing.B) {
 		"map":        map[string]string{"foo": "bar"},
 		"struct": struct {
 			Foo string
-			Bar []interface{}
+			Bar []any
 		}{
 			Foo: "foo",
-			Bar: []interface{}{nil, nil, nil},
+			Bar: []any{nil, nil, nil},
 		},
 	}
 
@@ -904,7 +904,7 @@ type testIncludable struct {
 	Ignore string
 }
 
-func (t testIncludable) HashInclude(field string, v interface{}) (bool, error) {
+func (t testIncludable) HashInclude(field string, v any) (bool, error) {
 	return field != "Ignore", nil
 }
 
@@ -912,7 +912,7 @@ type testIncludableMap struct {
 	Map map[string]string
 }
 
-func (t testIncludableMap) HashIncludeMap(field string, k, v interface{}) (bool, error) {
+func (t testIncludableMap) HashIncludeMap(field string, k, v any) (bool, error) {
 	if field != "Map" {
 		return true, nil
 	}
@@ -955,6 +955,6 @@ func (t *testHashablePointer) Hash() (uint64, error) {
 
 type testIncludableMapMap map[string]string
 
-func (t testIncludableMapMap) HashIncludeMap(_ string, k, _ interface{}) (bool, error) {
+func (t testIncludableMapMap) HashIncludeMap(_ string, k, _ any) (bool, error) {
 	return k.(string) != "ignore", nil
 }
