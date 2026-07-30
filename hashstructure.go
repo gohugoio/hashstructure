@@ -72,7 +72,7 @@ type HashOptions struct {
 //
 //   - "string" - The field will be hashed as a string, only works when the
 //     field implements fmt.Stringer
-func Hash(v interface{}, opts *HashOptions) (uint64, error) {
+func Hash(v any, opts *HashOptions) (uint64, error) {
 	// Create default options
 	if opts == nil {
 		opts = &HashOptions{}
@@ -119,11 +119,11 @@ type visitOpts struct {
 	Flags visitFlag
 
 	// Information about the struct containing this field
-	Struct      interface{}
+	Struct      any
 	StructField string
 }
 
-var timeType = reflect.TypeOf(time.Time{})
+var timeType = reflect.TypeFor[time.Time]()
 
 // A direct hash calculation used for numeric and bool values.
 func (w *walker) hashDirect(v any) (uint64, error) {
@@ -196,7 +196,7 @@ func hashString(h hash.Hash64, s string) (uint64, error) {
 }
 
 func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
-	t := reflect.TypeOf(0)
+	t := reflect.TypeFor[int]()
 
 	// Loop since these can be wrapped in multiple layers of pointers
 	// and interfaces.
@@ -303,7 +303,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	case reflect.Array:
 		var h uint64
 		l := v.Len()
-		for i := 0; i < l; i++ {
+		for i := range l {
 			current, err := w.visit(v.Index(i), nil)
 			if err != nil {
 				return 0, err
@@ -368,7 +368,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 
 	case reflect.Struct:
 		var include Includable
-		var parent interface{}
+		var parent any
 
 		// Check if we can address this value first (more common case for pointer receivers)
 		if v.CanAddr() {
@@ -411,7 +411,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		}
 		fieldOpts.Struct = parent
 
-		for i := 0; i < l; i++ {
+		for i := range l {
 			if innerV := v.Field(i); v.CanSet() || t.Field(i).Name != "_" {
 				fieldType := t.Field(i)
 				if fieldType.PkgPath != "" {
@@ -490,7 +490,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			set = (opts.Flags & visitFlagSet) != 0
 		}
 		l := v.Len()
-		for i := 0; i < l; i++ {
+		for i := range l {
 			current, err := w.visit(v.Index(i), nil)
 			if err != nil {
 				return 0, err

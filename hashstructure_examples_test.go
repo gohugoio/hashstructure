@@ -8,13 +8,13 @@ func ExampleHash() {
 	type ComplexStruct struct {
 		Name     string
 		Age      uint
-		Metadata map[string]interface{}
+		Metadata map[string]any
 	}
 
 	v := ComplexStruct{
 		Name: "mitchellh",
 		Age:  64,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"car":      true,
 			"location": "California",
 			"siblings": []string{"Bob", "John"},
