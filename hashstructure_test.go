@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+	qt "github.com/frankban/quicktest"
 )
 
 func TestHash_identity(t *testing.T) {
+	c := qt.New(t)
+
 	cases := []any{
 		nil,
 		"foo",
@@ -43,24 +46,18 @@ func TestHash_identity(t *testing.T) {
 		valuelist := make([]uint64, 100)
 		for i := range valuelist {
 			v, err := Hash(tc, nil)
-			if err != nil {
-				t.Fatalf("Error: %s\n\n%#v", err, tc)
-			}
+			c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc))
 
 			valuelist[i] = v
 		}
 
 		// Zero is always wrong
-		if valuelist[0] == 0 {
-			t.Fatalf("zero hash: %#v", tc)
-		}
+		c.Assert(valuelist[0], qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc))
 
 		// Make sure all the values match
-		t.Logf("%#v: %d", tc, valuelist[0])
+		c.Logf("%#v: %d", tc, valuelist[0])
 		for i := 1; i < len(valuelist); i++ {
-			if valuelist[i] != valuelist[0] {
-				t.Fatalf("non-matching: %d, %d\n\n%#v", i, 0, tc)
-			}
+			c.Assert(valuelist[i], qt.Equals, valuelist[0], qt.Commentf("%#v", tc))
 		}
 	}
 }
@@ -168,30 +165,24 @@ func TestHash_equal(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for i, tc := range cases {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			t.Logf("Hashing: %#v", tc.One)
+		c.Run(fmt.Sprintf("%d", i), func(c *qt.C) {
+			c.Logf("Hashing: %#v", tc.One)
 			one, err := Hash(tc.One, nil)
-			t.Logf("Result: %d", one)
-			if err != nil {
-				t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-			}
-			t.Logf("Hashing: %#v", tc.Two)
+			c.Logf("Result: %d", one)
+			c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
+			c.Logf("Hashing: %#v", tc.Two)
 			two, err := Hash(tc.Two, nil)
-			t.Logf("Result: %d", two)
-			if err != nil {
-				t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-			}
+			c.Logf("Result: %d", two)
+			c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 			// Zero is always wrong
-			if one == 0 {
-				t.Fatalf("zero hash: %#v", tc.One)
-			}
+			c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 			// Compare
-			if (one == two) != tc.Match {
-				t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-			}
+			c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 		})
 	}
 }
@@ -273,25 +264,19 @@ func TestHash_equalIgnore(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		one, err := Hash(tc.One, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 		two, err := Hash(tc.Two, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong
-		if one == 0 {
-			t.Fatalf("zero hash: %#v", tc.One)
-		}
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 		// Compare
-		if (one == two) != tc.Match {
-			t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-		}
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 	}
 }
 
@@ -329,16 +314,14 @@ func TestHash_stringTagError(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		_, err := Hash(tc.Test, nil)
 		if err != nil {
-			if ens, ok := err.(*ErrNotStringer); ok {
-				if ens.Field != tc.Field {
-					t.Fatalf("did not get expected field %#v: got %s wanted %s", tc.Test, ens.Field, tc.Field)
-				}
-			} else {
-				t.Fatalf("unknown error %#v: got %s", tc, err)
-			}
+			var ens *ErrNotStringer
+			c.Assert(err, qt.ErrorAs, &ens, qt.Commentf("%#v", tc))
+			c.Assert(ens.Field, qt.Equals, tc.Field, qt.Commentf("%#v", tc.Test))
 		}
 	}
 }
@@ -402,25 +385,19 @@ func TestHash_equalNil(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		one, err := Hash(tc.One, &HashOptions{ZeroNil: tc.ZeroNil})
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 		two, err := Hash(tc.Two, &HashOptions{ZeroNil: tc.ZeroNil})
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong
-		if one == 0 {
-			t.Fatalf("zero hash: %#v", tc.One)
-		}
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 		// Compare
-		if (one == two) != tc.Match {
-			t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-		}
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 	}
 }
 
@@ -447,25 +424,19 @@ func TestHash_equalSet(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		one, err := Hash(tc.One, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 		two, err := Hash(tc.Two, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong
-		if one == 0 {
-			t.Fatalf("zero hash: %#v", tc.One)
-		}
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 		// Compare
-		if (one == two) != tc.Match {
-			t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-		}
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 	}
 }
 
@@ -493,25 +464,19 @@ func TestHash_includable(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		one, err := Hash(tc.One, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 		two, err := Hash(tc.Two, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong
-		if one == 0 {
-			t.Fatalf("zero hash: %#v", tc.One)
-		}
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 		// Compare
-		if (one == two) != tc.Match {
-			t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-		}
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 	}
 }
 
@@ -544,18 +509,14 @@ func TestHash_ignoreZeroValue(t *testing.T) {
 		Bar: "bar",
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		hashA, err := Hash(structA, &HashOptions{IgnoreZeroValue: tc.IgnoreZeroValue})
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", structA, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", structA))
 		hashB, err := Hash(structB, &HashOptions{IgnoreZeroValue: tc.IgnoreZeroValue})
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", structB, err)
-		}
-		if (hashA == hashB) != tc.IgnoreZeroValue {
-			t.Fatalf("bad, expected: %#v\n\n%d\n\n%d", tc.IgnoreZeroValue, hashA, hashB)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", structB))
+		c.Assert(hashA == hashB, qt.Equals, tc.IgnoreZeroValue, qt.Commentf("%d\n\n%d", hashA, hashB))
 	}
 }
 
@@ -600,25 +561,19 @@ func TestHash_includableMap(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for _, tc := range cases {
 		one, err := Hash(tc.One, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 		two, err := Hash(tc.Two, nil)
-		if err != nil {
-			t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-		}
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong
-		if one == 0 {
-			t.Fatalf("zero hash: %#v", tc.One)
-		}
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 		// Compare
-		if (one == two) != tc.Match {
-			t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-		}
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 	}
 }
 
@@ -661,38 +616,26 @@ func TestHash_hashable(t *testing.T) {
 		},
 	}
 
+	c := qt.New(t)
+
 	for i, tc := range cases {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+		c.Run(fmt.Sprintf("%d", i), func(c *qt.C) {
 			one, err := Hash(tc.One, nil)
 			if tc.Err != "" {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-
-				if !strings.Contains(err.Error(), tc.Err) {
-					t.Fatalf("expected error to contain %q, got: %s", tc.Err, err)
-				}
-
+				c.Assert(err, qt.IsNotNil)
+				c.Assert(err.Error(), qt.Contains, tc.Err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("Failed to hash %#v: %s", tc.One, err)
-			}
+			c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
 
 			two, err := Hash(tc.Two, nil)
-			if err != nil {
-				t.Fatalf("Failed to hash %#v: %s", tc.Two, err)
-			}
+			c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 			// Zero is always wrong
-			if one == 0 {
-				t.Fatalf("zero hash: %#v", tc.One)
-			}
+			c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
 
 			// Compare
-			if (one == two) != tc.Match {
-				t.Fatalf("bad, expected: %#v\n\n%#v\n\n%#v", tc.Match, tc.One, tc.Two)
-			}
+			c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
 		})
 	}
 }
@@ -836,16 +779,13 @@ func TestHash_golden(t *testing.T) {
 		},
 	}
 
-	for i, tc := range cases {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			got, err := Hash(tc.In, nil)
-			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
-			}
+	c := qt.New(t)
 
-			if got != tc.Expect {
-				t.Fatalf("expected: %d, got: %d", tc.Expect, got)
-			}
+	for i, tc := range cases {
+		c.Run(fmt.Sprintf("%d", i), func(c *qt.C) {
+			got, err := Hash(tc.In, nil)
+			c.Assert(err, qt.IsNil)
+			c.Assert(got, qt.Equals, tc.Expect)
 		})
 	}
 }
