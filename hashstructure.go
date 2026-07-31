@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -93,7 +94,8 @@ func Hash(v any, opts *HashOptions) (uint64, error) {
 		opts = &HashOptions{}
 	}
 	if opts.Hasher == nil {
-		opts.Hasher = fnv.New64()
+		opts.Hasher = getFnv()
+		defer putFnv(opts.Hasher)
 	}
 	if opts.TagName == "" {
 		opts.TagName = "hash"
@@ -615,3 +617,18 @@ const (
 	visitFlagInvalid visitFlag = iota
 	visitFlagSet               = iota << 1
 )
+
+var fnvPool = sync.Pool{
+	New: func() any {
+		return fnv.New64()
+	},
+}
+
+func getFnv() hash.Hash64 {
+	return fnvPool.Get().(hash.Hash64)
+}
+
+func putFnv(h hash.Hash64) {
+	h.Reset()
+	fnvPool.Put(h)
+}
