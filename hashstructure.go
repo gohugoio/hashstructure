@@ -523,18 +523,31 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		// visit all the elements. If it is a set, then we do a deterministic
 		// hash code.
 		var h uint64
-		var set bool
+		set := w.sets
 		if opts != nil {
-			set = (opts.Flags & visitFlagSet) != 0
+			set = set || (opts.Flags&visitFlagSet) != 0
 		}
 		l := v.Len()
+		// In set mode, duplicate element hashes must be skipped: the hashes are
+		// combined with XOR, so an element repeated an even number of times
+		// cancels itself out, making e.g. {a, e, e} and {a, d, d} collide.
+		var seen map[uint64]struct{}
+		if set && l > 1 {
+			seen = make(map[uint64]struct{}, l)
+		}
 		for i := range l {
 			current, err := w.visit(v.Index(i), nil)
 			if err != nil {
 				return 0, err
 			}
 
-			if set || w.sets {
+			if set {
+				if seen != nil {
+					if _, ok := seen[current]; ok {
+						continue
+					}
+					seen[current] = struct{}{}
+				}
 				h = hashUpdateUnordered(h, current)
 			} else {
 				h = hashUpdateOrdered(w.h, h, current)
