@@ -343,7 +343,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 				return 0, err
 			}
 
-			h = hashUpdateOrdered(w.h, h, current)
+			h = w.hashUpdateOrdered(h, current)
 		}
 
 		return h, nil
@@ -391,12 +391,12 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 				return 0, err
 			}
 
-			fieldHash := hashUpdateOrdered(w.h, kh, vh)
-			h = hashUpdateUnordered(h, fieldHash)
+			fieldHash := w.hashUpdateOrdered(kh, vh)
+			h = w.hashUpdateUnordered(h, fieldHash)
 		}
 
 		// Important: read the docs for hashFinishUnordered
-		h = hashFinishUnordered(w.h, h)
+		h = w.hashFinishUnordered(h)
 
 		return h, nil
 
@@ -505,11 +505,11 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					return 0, err
 				}
 
-				fieldHash := hashUpdateOrdered(w.h, kh, vh)
-				h = hashUpdateUnordered(h, fieldHash)
+				fieldHash := w.hashUpdateOrdered(kh, vh)
+				h = w.hashUpdateUnordered(h, fieldHash)
 			}
 			// Important: read the docs for hashFinishUnordered
-			h = hashFinishUnordered(w.h, h)
+			h = w.hashFinishUnordered(h)
 		}
 
 		return h, nil
@@ -544,15 +544,15 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					}
 					seen[current] = struct{}{}
 				}
-				h = hashUpdateUnordered(h, current)
+				h = w.hashUpdateUnordered(h, current)
 			} else {
-				h = hashUpdateOrdered(w.h, h, current)
+				h = w.hashUpdateOrdered(h, current)
 			}
 		}
 
 		if set {
 			// Important: read the docs for hashFinishUnordered
-			h = hashFinishUnordered(w.h, h)
+			h = w.hashFinishUnordered(h)
 		}
 
 		return h, nil
@@ -564,19 +564,18 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	}
 }
 
-func hashUpdateOrdered(h hash.Hash64, a, b uint64) uint64 {
+func (w *walker) hashUpdateOrdered(a, b uint64) uint64 {
 	// For ordered updates, use a real hash function
-	h.Reset()
+	w.h.Reset()
 
-	var buf [16]byte
-	binary.LittleEndian.PutUint64(buf[0:8], a)
-	binary.LittleEndian.PutUint64(buf[8:16], b)
-	h.Write(buf[:])
+	binary.LittleEndian.PutUint64(w.buf[0:8], a)
+	binary.LittleEndian.PutUint64(w.buf[8:16], b)
+	w.h.Write(w.buf[:])
 
-	return h.Sum64()
+	return w.h.Sum64()
 }
 
-func hashUpdateUnordered(a, b uint64) uint64 {
+func (w *walker) hashUpdateUnordered(a, b uint64) uint64 {
 	return a ^ b
 }
 
@@ -594,14 +593,14 @@ func hashUpdateUnordered(a, b uint64) uint64 {
 //
 // hashFinishUnordered "hardens" the result, so that encountering partially
 // overlapping input data later on in a different context won't cancel out.
-func hashFinishUnordered(h hash.Hash64, a uint64) uint64 {
-	h.Reset()
+func (w *walker) hashFinishUnordered(a uint64) uint64 {
+	w.h.Reset()
 
 	var buf [8]byte
 	binary.LittleEndian.PutUint64(buf[:], a)
-	h.Write(buf[:])
+	w.h.Write(buf[:])
 
-	return h.Sum64()
+	return w.h.Sum64()
 }
 
 // visitFlag is used as a bitmask for affecting visit behavior
