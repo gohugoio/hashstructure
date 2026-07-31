@@ -441,6 +441,59 @@ func TestHash_equalSet(t *testing.T) {
 	}
 }
 
+// Issue #10: two slices that differ only by an item repeated in both
+// must not hash to the same value.
+func TestHash_setWithDuplicates(t *testing.T) {
+	type Test struct {
+		Friends []string `hash:"set"`
+	}
+
+	cases := []struct {
+		One, Two any
+		Match    bool
+	}{
+		{
+			[]string{"a", "b", "c", "e", "e"},
+			[]string{"a", "b", "c", "d", "d"},
+			false,
+		},
+
+		{
+			Test{Friends: []string{"a", "b", "c", "e", "e"}},
+			Test{Friends: []string{"a", "b", "c", "d", "d"}},
+			false,
+		},
+
+		// Duplicates don't count in a set, and order doesn't matter.
+		{
+			[]string{"e", "a", "b", "c", "e"},
+			[]string{"a", "b", "c", "e"},
+			true,
+		},
+
+		{
+			Test{Friends: []string{"e", "a", "b", "c", "e"}},
+			Test{Friends: []string{"a", "b", "c", "e"}},
+			true,
+		},
+	}
+
+	c := qt.New(t)
+
+	for _, tc := range cases {
+		one, err := Hash(tc.One, &HashOptions{SlicesAsSets: true})
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
+		two, err := Hash(tc.Two, &HashOptions{SlicesAsSets: true})
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
+
+		// Zero is always wrong
+		c.Assert(one, qt.Not(qt.Equals), uint64(0), qt.Commentf("%#v", tc.One))
+
+		// Compare
+		c.Assert(one == two, qt.Equals, tc.Match, qt.Commentf("%#v\n\n%#v", tc.One, tc.Two))
+	}
+}
+
 func TestHash_includable(t *testing.T) {
 	cases := []struct {
 		One, Two any
