@@ -39,6 +39,21 @@ type HashOptions struct {
 	// precedence (meaning that if the type doesn't implement fmt.Stringer, we
 	// panic)
 	UseStringer bool
+
+	// UnwrapFunc is a hook to replace a value with another value before hashing,
+	// e.g. to hash a struct by some identity method instead of its exported fields.
+	// It is called for every value visited, including nested values (struct fields,
+	// slice/array elements and map keys/values), after any pointers and interfaces
+	// have been dereferenced, so the hook typically wants to switch on the value's
+	// Kind before doing any work.
+	// Return the input value unchanged to hash it as-is.
+	// A changed value replaces the original: it is dereferenced and unwrapped
+	// again, then hashed in place of the original, bypassing any other handling
+	// of the original value (e.g. the Hashable interface and struct tags).
+	// Note that Hash has a fast path for top-level string values that bypasses
+	// this hook; a string nested inside another value still visits it. Keep
+	// this in mind if the hook rewrites strings.
+	UnwrapFunc func(reflect.Value) (reflect.Value, error)
 }
 
 // Hash returns the hash value of an arbitrary value.
@@ -88,6 +103,7 @@ func Hash(v any, opts *HashOptions) (uint64, error) {
 	opts.Hasher.Reset()
 
 	// Fast path for strings.
+	// This deliberately bypasses UnwrapFunc; see its documentation.
 	if s, ok := v.(string); ok {
 		return hashString(opts.Hasher, s)
 	}
@@ -100,6 +116,7 @@ func Hash(v any, opts *HashOptions) (uint64, error) {
 		ignorezerovalue: opts.IgnoreZeroValue,
 		sets:            opts.SlicesAsSets,
 		stringer:        opts.UseStringer,
+		unwrap:          opts.UnwrapFunc,
 	}
 	return w.visit(reflect.ValueOf(v), nil)
 }
@@ -111,6 +128,7 @@ type walker struct {
 	ignorezerovalue bool
 	sets            bool
 	stringer        bool
+	unwrap          func(reflect.Value) (reflect.Value, error)
 	buf             [16]byte // Reusable buffer for binary encoding
 }
 
@@ -124,6 +142,10 @@ type visitOpts struct {
 }
 
 var timeType = reflect.TypeFor[time.Time]()
+
+// maxUnwraps caps the number of times UnwrapFunc may rewrite a single value,
+// as a guard against hooks that never converge.
+const maxUnwraps = 32
 
 // A direct hash calculation used for numeric and bool values.
 func (w *walker) hashDirect(v any) (uint64, error) {
@@ -199,8 +221,9 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	t := reflect.TypeFor[int]()
 
 	// Loop since these can be wrapped in multiple layers of pointers
-	// and interfaces.
-	for {
+	// and interfaces. An unwrapped value re-enters the loop, as it may
+	// itself be wrapped or subject to further unwrapping.
+	for unwraps := 0; ; {
 		// If we have an interface, dereference it. We have to do this up
 		// here because it might be a nil in there and the check below must
 		// catch that.
@@ -217,12 +240,27 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			continue
 		}
 
-		break
-	}
+		// If it is nil, treat it like a zero.
+		if !v.IsValid() {
+			v = reflect.Zero(t)
+		}
 
-	// If it is nil, treat it like a zero.
-	if !v.IsValid() {
-		v = reflect.Zero(t)
+		if w.unwrap != nil {
+			vv, err := w.unwrap(v)
+			if err != nil {
+				return 0, err
+			}
+			if vv != v {
+				unwraps++
+				if unwraps > maxUnwraps {
+					return 0, fmt.Errorf("unwrapped value %s more than %d times; check that UnwrapFunc returns its input unchanged when there is nothing to unwrap", v.Type(), maxUnwraps)
+				}
+				v = vv
+				continue
+			}
+		}
+
+		break
 	}
 
 	if v.CanInt() {

@@ -2,6 +2,7 @@ package hashstructure
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -640,6 +641,133 @@ func TestHash_hashable(t *testing.T) {
 	}
 }
 
+func TestHash_unwrapFunc(t *testing.T) {
+	c := qt.New(t)
+
+	// Unwraps values with a Key() string method to the key, the common case
+	// being structs whose identity lives in unexported fields.
+	keyOpts := func() *HashOptions {
+		return &HashOptions{
+			UnwrapFunc: func(v reflect.Value) (reflect.Value, error) {
+				if v.Kind() != reflect.Struct {
+					return v, nil
+				}
+				var in any
+				if v.CanAddr() {
+					in = v.Addr().Interface()
+				} else {
+					in = v.Interface()
+				}
+				if k, ok := in.(interface{ Key() string }); ok {
+					return reflect.ValueOf(k.Key()), nil
+				}
+				return v, nil
+			},
+		}
+	}
+
+	hash := func(c *qt.C, v any, opts *HashOptions) uint64 {
+		h, err := Hash(v, opts)
+		c.Assert(err, qt.IsNil, qt.Commentf("%#v", v))
+		return h
+	}
+
+	c.Run("value receiver", func(c *qt.C) {
+		one := hash(c, testUnwrapKeyer{key: "foo"}, keyOpts())
+		two := hash(c, testUnwrapKeyer{key: "foo"}, keyOpts())
+		three := hash(c, testUnwrapKeyer{key: "bar"}, keyOpts())
+		c.Assert(one, qt.Equals, two)
+		c.Assert(one, qt.Not(qt.Equals), three)
+	})
+
+	c.Run("pointer receiver", func(c *qt.C) {
+		// The struct is reached through a pointer, so it's addressable and the
+		// hook finds the pointer receiver method via Addr.
+		one := hash(c, &testUnwrapKeyerPointer{key: "foo"}, keyOpts())
+		two := hash(c, &testUnwrapKeyerPointer{key: "foo"}, keyOpts())
+		three := hash(c, &testUnwrapKeyerPointer{key: "bar"}, keyOpts())
+		c.Assert(one, qt.Equals, two)
+		c.Assert(one, qt.Not(qt.Equals), three)
+	})
+
+	c.Run("hashes as the unwrapped value", func(c *qt.C) {
+		c.Assert(hash(c, testUnwrapKeyer{key: "foo"}, keyOpts()), qt.Equals, hash(c, "foo", keyOpts()))
+	})
+
+	c.Run("nested", func(c *qt.C) {
+		one := hash(c, []any{"a", &testUnwrapKeyerPointer{key: "foo"}}, keyOpts())
+		two := hash(c, []any{"a", &testUnwrapKeyerPointer{key: "bar"}}, keyOpts())
+		c.Assert(one, qt.Not(qt.Equals), two)
+
+		three := hash(c, map[string]any{"a": testUnwrapKeyer{key: "foo"}}, keyOpts())
+		four := hash(c, map[string]any{"a": testUnwrapKeyer{key: "bar"}}, keyOpts())
+		c.Assert(three, qt.Not(qt.Equals), four)
+
+		// Without the hook, the unexported keys are invisible to the walker.
+		c.Assert(hash(c, []any{"a", &testUnwrapKeyerPointer{key: "foo"}}, nil), qt.Equals, hash(c, []any{"a", &testUnwrapKeyerPointer{key: "bar"}}, nil))
+	})
+
+	c.Run("no-op hook", func(c *qt.C) {
+		noop := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) { return v, nil }}
+		v := struct {
+			A string
+			B int
+		}{"a", 32}
+		c.Assert(hash(c, v, noop), qt.Equals, hash(c, v, nil))
+	})
+
+	c.Run("unwrapped value is dereferenced", func(c *qt.C) {
+		s := "foo"
+		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) {
+			if v.Type() == reflect.TypeFor[testUnwrapKeyer]() {
+				return reflect.ValueOf(&s), nil
+			}
+			return v, nil
+		}}
+		c.Assert(hash(c, testUnwrapKeyer{key: "ignored"}, opts), qt.Equals, hash(c, "foo", opts))
+	})
+
+	c.Run("unwrapped value is unwrapped again", func(c *qt.C) {
+		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) {
+			switch v.Type() {
+			case reflect.TypeFor[testUnwrapChainA]():
+				return reflect.ValueOf(testUnwrapChainB{}), nil
+			case reflect.TypeFor[testUnwrapChainB]():
+				return reflect.ValueOf("final"), nil
+			}
+			return v, nil
+		}}
+		c.Assert(hash(c, testUnwrapChainA{}, opts), qt.Equals, hash(c, "final", opts))
+	})
+
+	c.Run("takes precedence over Hashable", func(c *qt.C) {
+		v := &testUnwrapHashableKeyer{}
+		c.Assert(hash(c, v, keyOpts()), qt.Equals, hash(c, "key", keyOpts()))
+		c.Assert(hash(c, v, nil), qt.Equals, uint64(12345))
+	})
+
+	c.Run("error", func(c *qt.C) {
+		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) {
+			if v.Kind() == reflect.Struct {
+				return v, fmt.Errorf("unwrap failed")
+			}
+			return v, nil
+		}}
+		_, err := Hash(testUnwrapKeyer{key: "foo"}, opts)
+		c.Assert(err, qt.ErrorMatches, "unwrap failed")
+	})
+
+	c.Run("runaway hook errors", func(c *qt.C) {
+		var n int
+		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) {
+			n++
+			return reflect.ValueOf(fmt.Sprintf("%d", n)), nil
+		}}
+		_, err := Hash(testUnwrapKeyer{key: "foo"}, opts)
+		c.Assert(err, qt.ErrorMatches, `.*more than 32 times.*`)
+	})
+}
+
 func TestHash_golden(t *testing.T) {
 	foo := "foo"
 
@@ -818,22 +946,31 @@ func BenchmarkMap(b *testing.B) {
 		},
 	}
 
-	for i := 0; i < b.N; i++ {
-		Hash(m, nil)
-	}
+	b.Run("default", func(b *testing.B) {
+		for b.Loop() {
+			Hash(m, nil)
+		}
+	})
+
+	b.Run("no-op unwrap", func(b *testing.B) {
+		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) { return v, nil }}
+		for b.Loop() {
+			Hash(m, opts)
+		}
+	})
 }
 
 func BenchmarkString(b *testing.B) {
 	s := "lorem ipsum dolor sit amet"
 	b.Run("default", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			Hash(s, nil)
 		}
 	})
 
 	b.Run("xxhash", func(b *testing.B) {
 		opts := &HashOptions{Hasher: xxhash.New()}
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			Hash(s, opts)
 		}
 	})
@@ -898,3 +1035,25 @@ type testIncludableMapMap map[string]string
 func (t testIncludableMapMap) HashIncludeMap(_ string, k, _ any) (bool, error) {
 	return k.(string) != "ignore", nil
 }
+
+type testUnwrapKeyer struct {
+	key string
+}
+
+func (t testUnwrapKeyer) Key() string { return t.key }
+
+type testUnwrapKeyerPointer struct {
+	key string
+}
+
+func (t *testUnwrapKeyerPointer) Key() string { return t.key }
+
+type testUnwrapChainA struct{}
+
+type testUnwrapChainB struct{}
+
+type testUnwrapHashableKeyer struct{}
+
+func (t *testUnwrapHashableKeyer) Hash() (uint64, error) { return 12345, nil }
+
+func (t *testUnwrapHashableKeyer) Key() string { return "key" }
