@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -972,6 +973,16 @@ func TestHash_golden(t *testing.T) {
 			got, err := Hash(tc.In, nil)
 			c.Assert(err, qt.IsNil)
 			c.Assert(got, qt.Equals, tc.Expect)
+
+			h := fnv.New64()
+			// Make sure the custom hasher is reset correctly.
+			h.Write([]byte("hello"))
+			opts := &HashOptions{Hasher: h}
+			for range 2 {
+				got, err := Hash(tc.In, opts)
+				c.Assert(err, qt.IsNil)
+				c.Assert(got, qt.Equals, tc.Expect)
+			}
 		})
 	}
 }
@@ -1018,6 +1029,49 @@ func TestHash_slicesAsSet_golden(t *testing.T) {
 			c.Assert(got, qt.Equals, tc.Expect)
 		})
 	}
+}
+
+func TestHash_concurrentSharedOptions(t *testing.T) {
+	c := qt.New(t)
+
+	type testStruct struct {
+		Foo string
+	}
+	v := testStruct{Foo: "foo"}
+
+	expect, err := Hash(v, nil)
+	c.Assert(err, qt.IsNil)
+
+	// Shared across goroutines without any warm-up call, so that any
+	// write to it inside Hash (Hasher, TagName) is caught by -race.
+	// See issue #23.
+	opts := &HashOptions{}
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for j := range 1000 {
+				o := opts
+				if j%2 == 0 {
+					o = nil
+				}
+				got, err := Hash(v, o)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+					return
+				}
+				if got != expect {
+					t.Errorf("hash mismatch: got %d, want %d", got, expect)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	// Hash must have treated the shared options as read-only.
+	c.Assert(opts.Hasher, qt.IsNil)
+	c.Assert(opts.TagName, qt.Equals, "")
 }
 
 func BenchmarkMap(b *testing.B) {

@@ -60,9 +60,10 @@ type HashOptions struct {
 // Hash returns the hash value of an arbitrary value.
 //
 // If opts is nil, then default options will be used. See HashOptions
-// for the default values. The same *HashOptions value cannot be used
-// concurrently. None of the values within a *HashOptions struct are
-// safe to read/write while hashing is being done.
+// for the default values. Hash treats opts as read-only, so the same
+// *HashOptions value can be shared and reused, also concurrently, as
+// long as its Hasher is nil: a hash.Hash64 is stateful, so a
+// *HashOptions carrying a custom Hasher must not be used concurrently.
 //
 // Notes on the value:
 //
@@ -89,29 +90,27 @@ type HashOptions struct {
 //   - "string" - The field will be hashed as a string, only works when the
 //     field implements fmt.Stringer
 func Hash(v any, opts *HashOptions) (uint64, error) {
-	// Create default options
 	if opts == nil {
 		opts = &HashOptions{}
 	}
-	if opts.Hasher == nil {
-		opts.Hasher = getFnv()
-		defer putFnv(opts.Hasher)
-	}
-	if opts.TagName == "" {
-		opts.TagName = "hash"
+
+	hasher := opts.Hasher
+	if hasher == nil {
+		hasher = getFnv()
+		defer putFnv(hasher)
 	}
 
-	// Reset the hash
-	opts.Hasher.Reset()
+	// No Reset of the hasher here: every function that touches it
+	// (hashString, hashDirect etc.) resets it before writing.
+	// Keep it that way if you add a new write site.
 
 	// Fast path for strings.
 	// This deliberately bypasses UnwrapFunc; see its documentation.
 	if s, ok := v.(string); ok {
-		return hashString(opts.Hasher, s)
+		return hashString(hasher, s)
 	}
 
-	// Create our walker and walk the structure
-	w := getWalker(opts.Hasher, opts)
+	w := getWalker(hasher, opts)
 	defer putWalker(w)
 
 	return w.visit(reflect.ValueOf(v), nil)
@@ -596,9 +595,8 @@ func (w *walker) hashUpdateUnordered(a, b uint64) uint64 {
 func (w *walker) hashFinishUnordered(a uint64) uint64 {
 	w.h.Reset()
 
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], a)
-	w.h.Write(buf[:])
+	binary.LittleEndian.PutUint64(w.buf[:8], a)
+	w.h.Write(w.buf[:8])
 
 	return w.h.Sum64()
 }
@@ -621,6 +619,9 @@ func getWalker(h hash.Hash64, opts *HashOptions) *walker {
 	w := walkerPool.Get().(*walker)
 	w.h = h
 	w.tag = opts.TagName
+	if w.tag == "" {
+		w.tag = "hash"
+	}
 	w.zeronil = opts.ZeroNil
 	w.ignorezerovalue = opts.IgnoreZeroValue
 	w.sets = opts.SlicesAsSets
@@ -652,6 +653,6 @@ func getFnv() hash.Hash64 {
 }
 
 func putFnv(h hash.Hash64) {
-	// It will be reeset before it's used again.
+	// It will be reset before it's used again.
 	fnvPool.Put(h)
 }
