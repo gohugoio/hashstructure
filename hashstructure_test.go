@@ -2,6 +2,7 @@ package hashstructure
 
 import (
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"strings"
 	"testing"
@@ -1057,6 +1058,34 @@ func BenchmarkMap(b *testing.B) {
 		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) { return v, nil }}
 		for b.Loop() {
 			Hash(m, opts)
+		}
+	})
+}
+
+func BenchmarkStruct(b *testing.B) {
+	type testStruct struct {
+		Foo string
+	}
+
+	b.Run("value", func(b *testing.B) {
+		s := testStruct{Foo: "foo"}
+		for b.Loop() {
+			Hash(s, nil)
+		}
+	})
+
+	b.Run("pointer", func(b *testing.B) {
+		s := &testStruct{Foo: "foo"}
+		for b.Loop() {
+			Hash(s, nil)
+		}
+	})
+
+	b.Run("pointer predefined hasher", func(b *testing.B) {
+		s := &testStruct{Foo: "foo"}
+		opts := &HashOptions{Hasher: fnv.New64()}
+		for b.Loop() {
+			Hash(s, opts)
 		}
 	})
 }
