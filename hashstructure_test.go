@@ -481,9 +481,13 @@ func TestHash_setWithDuplicates(t *testing.T) {
 	c := qt.New(t)
 
 	for _, tc := range cases {
-		one, err := Hash(tc.One, &HashOptions{SlicesAsSets: true})
+		opts := &HashOptions{SlicesAsSets: true}
+		if _, ok := tc.One.(Test); ok {
+			opts = nil
+		}
+		one, err := Hash(tc.One, opts)
 		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.One))
-		two, err := Hash(tc.Two, &HashOptions{SlicesAsSets: true})
+		two, err := Hash(tc.Two, opts)
 		c.Assert(err, qt.IsNil, qt.Commentf("%#v", tc.Two))
 
 		// Zero is always wrong

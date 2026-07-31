@@ -528,7 +528,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 			set = set || (opts.Flags&visitFlagSet) != 0
 		}
 		l := v.Len()
-		// In set mode, duplicate elements must be skipped: the hashes are
+		// In set mode, duplicate element hashes must be skipped: the hashes are
 		// combined with XOR, so an element repeated an even number of times
 		// cancels itself out, making e.g. {a, e, e} and {a, d, d} collide.
 		var seen map[uint64]struct{}
