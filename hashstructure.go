@@ -111,15 +111,9 @@ func Hash(v any, opts *HashOptions) (uint64, error) {
 	}
 
 	// Create our walker and walk the structure
-	w := &walker{
-		h:               opts.Hasher,
-		tag:             opts.TagName,
-		zeronil:         opts.ZeroNil,
-		ignorezerovalue: opts.IgnoreZeroValue,
-		sets:            opts.SlicesAsSets,
-		stringer:        opts.UseStringer,
-		unwrap:          opts.UnwrapFunc,
-	}
+	w := getWalker(opts.Hasher, opts)
+	defer putWalker(w)
+
 	return w.visit(reflect.ValueOf(v), nil)
 }
 
@@ -618,6 +612,36 @@ const (
 	visitFlagSet               = iota << 1
 )
 
+var walkerPool = sync.Pool{
+	New: func() any {
+		return &walker{}
+	},
+}
+
+func getWalker(h hash.Hash64, opts *HashOptions) *walker {
+	w := walkerPool.Get().(*walker)
+	w.h = h
+	w.tag = opts.TagName
+	w.zeronil = opts.ZeroNil
+	w.ignorezerovalue = opts.IgnoreZeroValue
+	w.sets = opts.SlicesAsSets
+	w.stringer = opts.UseStringer
+	w.unwrap = opts.UnwrapFunc
+	return w
+}
+
+func putWalker(w *walker) {
+	w.h = nil
+	w.tag = ""
+	w.zeronil = false
+	w.ignorezerovalue = false
+	w.sets = false
+	w.stringer = false
+	w.unwrap = nil
+
+	walkerPool.Put(w)
+}
+
 var fnvPool = sync.Pool{
 	New: func() any {
 		return fnv.New64()
@@ -629,6 +653,6 @@ func getFnv() hash.Hash64 {
 }
 
 func putFnv(h hash.Hash64) {
-	h.Reset()
+	// It will be reeset before it's used again.
 	fnvPool.Put(h)
 }
