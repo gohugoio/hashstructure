@@ -975,6 +975,50 @@ func TestHash_golden(t *testing.T) {
 	}
 }
 
+func TestHash_slicesAsSet_golden(t *testing.T) {
+	cases := []struct {
+		In     any
+		Expect uint64
+	}{
+		{
+			In: struct {
+				Foo string
+				Bar []any
+			}{
+				Foo: "foo",
+				Bar: []any{nil, nil, nil},
+			},
+			Expect: 3717100187917615858,
+		},
+		{
+			In:     []any{1, 2, 3},
+			Expect: 2044210338600952799,
+		},
+		{
+			In:     []any{3, 2, 3, 3, 1},
+			Expect: 2044210338600952799,
+		},
+		{
+			In:     []string{"a", "b", "c", "e", "e"},
+			Expect: 14856124470027295614,
+		},
+		{
+			In:     []string{"a", "b", "c", "d", "d"},
+			Expect: 10627943203888361049,
+		},
+	}
+
+	c := qt.New(t)
+
+	for i, tc := range cases {
+		c.Run(fmt.Sprintf("%d", i), func(c *qt.C) {
+			got, err := Hash(tc.In, &HashOptions{SlicesAsSets: true})
+			c.Assert(err, qt.IsNil)
+			c.Assert(got, qt.Equals, tc.Expect)
+		})
+	}
+}
+
 func BenchmarkMap(b *testing.B) {
 	m := map[string]any{
 		"int16":      int16(42),
