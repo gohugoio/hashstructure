@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -59,9 +60,10 @@ type HashOptions struct {
 // Hash returns the hash value of an arbitrary value.
 //
 // If opts is nil, then default options will be used. See HashOptions
-// for the default values. The same *HashOptions value cannot be used
-// concurrently. None of the values within a *HashOptions struct are
-// safe to read/write while hashing is being done.
+// for the default values. Hash treats opts as read-only, so the same
+// *HashOptions value can be shared and reused, also concurrently, as
+// long as its Hasher is nil: a hash.Hash64 is stateful, so a
+// *HashOptions carrying a custom Hasher must not be used concurrently.
 //
 // Notes on the value:
 //
@@ -88,36 +90,29 @@ type HashOptions struct {
 //   - "string" - The field will be hashed as a string, only works when the
 //     field implements fmt.Stringer
 func Hash(v any, opts *HashOptions) (uint64, error) {
-	// Create default options
 	if opts == nil {
 		opts = &HashOptions{}
 	}
-	if opts.Hasher == nil {
-		opts.Hasher = fnv.New64()
-	}
-	if opts.TagName == "" {
-		opts.TagName = "hash"
+
+	hasher := opts.Hasher
+	if hasher == nil {
+		hasher = getFnv()
+		defer putFnv(hasher)
 	}
 
-	// Reset the hash
-	opts.Hasher.Reset()
+	// No Reset of the hasher here: every function that touches it
+	// (hashString, hashDirect etc.) resets it before writing.
+	// Keep it that way if you add a new write site.
 
 	// Fast path for strings.
 	// This deliberately bypasses UnwrapFunc; see its documentation.
 	if s, ok := v.(string); ok {
-		return hashString(opts.Hasher, s)
+		return hashString(hasher, s)
 	}
 
-	// Create our walker and walk the structure
-	w := &walker{
-		h:               opts.Hasher,
-		tag:             opts.TagName,
-		zeronil:         opts.ZeroNil,
-		ignorezerovalue: opts.IgnoreZeroValue,
-		sets:            opts.SlicesAsSets,
-		stringer:        opts.UseStringer,
-		unwrap:          opts.UnwrapFunc,
-	}
+	w := getWalker(hasher, opts)
+	defer putWalker(w)
+
 	return w.visit(reflect.ValueOf(v), nil)
 }
 
@@ -347,7 +342,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 				return 0, err
 			}
 
-			h = hashUpdateOrdered(w.h, h, current)
+			h = w.hashUpdateOrdered(h, current)
 		}
 
 		return h, nil
@@ -395,12 +390,12 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 				return 0, err
 			}
 
-			fieldHash := hashUpdateOrdered(w.h, kh, vh)
-			h = hashUpdateUnordered(h, fieldHash)
+			fieldHash := w.hashUpdateOrdered(kh, vh)
+			h = w.hashUpdateUnordered(h, fieldHash)
 		}
 
 		// Important: read the docs for hashFinishUnordered
-		h = hashFinishUnordered(w.h, h)
+		h = w.hashFinishUnordered(h)
 
 		return h, nil
 
@@ -509,11 +504,11 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					return 0, err
 				}
 
-				fieldHash := hashUpdateOrdered(w.h, kh, vh)
-				h = hashUpdateUnordered(h, fieldHash)
+				fieldHash := w.hashUpdateOrdered(kh, vh)
+				h = w.hashUpdateUnordered(h, fieldHash)
 			}
 			// Important: read the docs for hashFinishUnordered
-			h = hashFinishUnordered(w.h, h)
+			h = w.hashFinishUnordered(h)
 		}
 
 		return h, nil
@@ -548,15 +543,15 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					}
 					seen[current] = struct{}{}
 				}
-				h = hashUpdateUnordered(h, current)
+				h = w.hashUpdateUnordered(h, current)
 			} else {
-				h = hashUpdateOrdered(w.h, h, current)
+				h = w.hashUpdateOrdered(h, current)
 			}
 		}
 
 		if set {
 			// Important: read the docs for hashFinishUnordered
-			h = hashFinishUnordered(w.h, h)
+			h = w.hashFinishUnordered(h)
 		}
 
 		return h, nil
@@ -568,19 +563,18 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 	}
 }
 
-func hashUpdateOrdered(h hash.Hash64, a, b uint64) uint64 {
+func (w *walker) hashUpdateOrdered(a, b uint64) uint64 {
 	// For ordered updates, use a real hash function
-	h.Reset()
+	w.h.Reset()
 
-	var buf [16]byte
-	binary.LittleEndian.PutUint64(buf[0:8], a)
-	binary.LittleEndian.PutUint64(buf[8:16], b)
-	h.Write(buf[:])
+	binary.LittleEndian.PutUint64(w.buf[0:8], a)
+	binary.LittleEndian.PutUint64(w.buf[8:16], b)
+	w.h.Write(w.buf[:])
 
-	return h.Sum64()
+	return w.h.Sum64()
 }
 
-func hashUpdateUnordered(a, b uint64) uint64 {
+func (w *walker) hashUpdateUnordered(a, b uint64) uint64 {
 	return a ^ b
 }
 
@@ -598,14 +592,13 @@ func hashUpdateUnordered(a, b uint64) uint64 {
 //
 // hashFinishUnordered "hardens" the result, so that encountering partially
 // overlapping input data later on in a different context won't cancel out.
-func hashFinishUnordered(h hash.Hash64, a uint64) uint64 {
-	h.Reset()
+func (w *walker) hashFinishUnordered(a uint64) uint64 {
+	w.h.Reset()
 
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], a)
-	h.Write(buf[:])
+	binary.LittleEndian.PutUint64(w.buf[:8], a)
+	w.h.Write(w.buf[:8])
 
-	return h.Sum64()
+	return w.h.Sum64()
 }
 
 // visitFlag is used as a bitmask for affecting visit behavior
@@ -615,3 +608,51 @@ const (
 	visitFlagInvalid visitFlag = iota
 	visitFlagSet               = iota << 1
 )
+
+var walkerPool = sync.Pool{
+	New: func() any {
+		return &walker{}
+	},
+}
+
+func getWalker(h hash.Hash64, opts *HashOptions) *walker {
+	w := walkerPool.Get().(*walker)
+	w.h = h
+	w.tag = opts.TagName
+	if w.tag == "" {
+		w.tag = "hash"
+	}
+	w.zeronil = opts.ZeroNil
+	w.ignorezerovalue = opts.IgnoreZeroValue
+	w.sets = opts.SlicesAsSets
+	w.stringer = opts.UseStringer
+	w.unwrap = opts.UnwrapFunc
+	return w
+}
+
+func putWalker(w *walker) {
+	w.h = nil
+	w.tag = ""
+	w.zeronil = false
+	w.ignorezerovalue = false
+	w.sets = false
+	w.stringer = false
+	w.unwrap = nil
+
+	walkerPool.Put(w)
+}
+
+var fnvPool = sync.Pool{
+	New: func() any {
+		return fnv.New64()
+	},
+}
+
+func getFnv() hash.Hash64 {
+	return fnvPool.Get().(hash.Hash64)
+}
+
+func putFnv(h hash.Hash64) {
+	// It will be reset before it's used again.
+	fnvPool.Put(h)
+}

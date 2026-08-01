@@ -2,8 +2,10 @@ package hashstructure
 
 import (
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -971,8 +973,105 @@ func TestHash_golden(t *testing.T) {
 			got, err := Hash(tc.In, nil)
 			c.Assert(err, qt.IsNil)
 			c.Assert(got, qt.Equals, tc.Expect)
+
+			h := fnv.New64()
+			// Make sure the custom hasher is reset correctly.
+			h.Write([]byte("hello"))
+			opts := &HashOptions{Hasher: h}
+			for range 2 {
+				got, err := Hash(tc.In, opts)
+				c.Assert(err, qt.IsNil)
+				c.Assert(got, qt.Equals, tc.Expect)
+			}
 		})
 	}
+}
+
+func TestHash_slicesAsSet_golden(t *testing.T) {
+	cases := []struct {
+		In     any
+		Expect uint64
+	}{
+		{
+			In: struct {
+				Foo string
+				Bar []any
+			}{
+				Foo: "foo",
+				Bar: []any{nil, nil, nil},
+			},
+			Expect: 3717100187917615858,
+		},
+		{
+			In:     []any{1, 2, 3},
+			Expect: 2044210338600952799,
+		},
+		{
+			In:     []any{3, 2, 3, 3, 1},
+			Expect: 2044210338600952799,
+		},
+		{
+			In:     []string{"a", "b", "c", "e", "e"},
+			Expect: 14856124470027295614,
+		},
+		{
+			In:     []string{"a", "b", "c", "d", "d"},
+			Expect: 10627943203888361049,
+		},
+	}
+
+	c := qt.New(t)
+
+	for i, tc := range cases {
+		c.Run(fmt.Sprintf("%d", i), func(c *qt.C) {
+			got, err := Hash(tc.In, &HashOptions{SlicesAsSets: true})
+			c.Assert(err, qt.IsNil)
+			c.Assert(got, qt.Equals, tc.Expect)
+		})
+	}
+}
+
+func TestHash_concurrentSharedOptions(t *testing.T) {
+	c := qt.New(t)
+
+	type testStruct struct {
+		Foo string
+	}
+	v := testStruct{Foo: "foo"}
+
+	expect, err := Hash(v, nil)
+	c.Assert(err, qt.IsNil)
+
+	// Shared across goroutines without any warm-up call, so that any
+	// write to it inside Hash (Hasher, TagName) is caught by -race.
+	// See issue #23.
+	opts := &HashOptions{}
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for j := range 1000 {
+				o := opts
+				if j%2 == 0 {
+					o = nil
+				}
+				got, err := Hash(v, o)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+					return
+				}
+				if got != expect {
+					t.Errorf("hash mismatch: got %d, want %d", got, expect)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	// Hash must have treated the shared options as read-only.
+	c.Assert(opts.Hasher, qt.IsNil)
+	c.Assert(opts.TagName, qt.Equals, "")
 }
 
 func BenchmarkMap(b *testing.B) {
@@ -1013,6 +1112,34 @@ func BenchmarkMap(b *testing.B) {
 		opts := &HashOptions{UnwrapFunc: func(v reflect.Value) (reflect.Value, error) { return v, nil }}
 		for b.Loop() {
 			Hash(m, opts)
+		}
+	})
+}
+
+func BenchmarkStruct(b *testing.B) {
+	type testStruct struct {
+		Foo string
+	}
+
+	b.Run("value", func(b *testing.B) {
+		s := testStruct{Foo: "foo"}
+		for b.Loop() {
+			Hash(s, nil)
+		}
+	})
+
+	b.Run("pointer", func(b *testing.B) {
+		s := &testStruct{Foo: "foo"}
+		for b.Loop() {
+			Hash(s, nil)
+		}
+	})
+
+	b.Run("pointer predefined hasher", func(b *testing.B) {
+		s := &testStruct{Foo: "foo"}
+		opts := &HashOptions{Hasher: fnv.New64()}
+		for b.Loop() {
+			Hash(s, opts)
 		}
 	})
 }
