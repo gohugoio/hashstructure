@@ -1,6 +1,6 @@
 [![Tests on Linux, MacOS and Windows](https://github.com/gohugoio/hashstructure/workflows/Test/badge.svg)](https://github.com/gohugoio/hashstructure/actions?query=workflow:Test)
 [![GoDoc](https://godoc.org/github.com/gohugoio/gohugoio?status.svg)](https://godoc.org/github.com/gohugoio/hashstructure)
-[![Release](https://img.shields.io/github/release/gohugoio/hashstructure.svg?style=flat-square)](https://github.com/bep/hashstructure/releases/latest)
+[![Release](https://img.shields.io/github/release/gohugoio/hashstructure.svg?style=flat-square)](https://github.com/gohugoio/hashstructure/releases/latest)
 
 hashstructure is a Go library for creating a unique hash value
 for arbitrary values in Go.
