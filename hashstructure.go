@@ -351,7 +351,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		var includeMap IncludableMap
 		var field string
 
-		if v, ok := v.Interface().(IncludableMap); ok {
+		if v, ok := reflect.TypeAssert[IncludableMap](v); ok {
 			includeMap = v
 		} else if opts != nil && opts.Struct != nil {
 			if v, ok := opts.Struct.(IncludableMap); ok {
@@ -466,7 +466,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 
 				// if string is set, use the string value
 				if tag == "string" || w.stringer {
-					if impl, ok := innerV.Interface().(fmt.Stringer); ok {
+					if impl, ok := reflect.TypeAssert[fmt.Stringer](innerV); ok {
 						innerV = reflect.ValueOf(impl.String())
 					} else if tag == "string" {
 						// We only show this error if the tag explicitly
